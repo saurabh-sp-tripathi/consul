@@ -84,7 +84,7 @@ func (_m *MockProvider) CrossSignCA(_a0 *x509.Certificate) (string, error) {
 }
 
 // GenerateIntermediate provides a mock function with given fields:
-func (_m *MockProvider) GenerateIntermediate() (string, error) {
+func (_m *MockProvider) NewLeafSigningCertificate() (string, error) {
 	ret := _m.Called()
 
 	var r0 string

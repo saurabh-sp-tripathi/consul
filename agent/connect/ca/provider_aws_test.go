@@ -53,7 +53,7 @@ func TestAWSBootstrapAndSignPrimary(t *testing.T) {
 
 			// Generate Intermediate (not actually needed for this provider for now
 			// but this simulates the calls in Server.initializeRoot).
-			interPEM, err := provider.GenerateIntermediate()
+			interPEM, err := provider.NewLeafSigningCertificate()
 			require.NoError(err)
 
 			// Should be the same for now

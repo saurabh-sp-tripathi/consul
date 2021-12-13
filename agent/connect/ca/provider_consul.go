@@ -291,7 +291,7 @@ func (c *ConsulProvider) ActiveIntermediate() (string, error) {
 
 // We aren't maintaining separate root/intermediate CAs for the builtin
 // provider, so just return the root.
-func (c *ConsulProvider) GenerateIntermediate() (string, error) {
+func (c *ConsulProvider) NewLeafSigningCertificate() (string, error) {
 	return c.ActiveIntermediate()
 }
 

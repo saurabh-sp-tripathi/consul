@@ -1311,7 +1311,7 @@ func TestNewCARoot(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			require := require.New(t)
-			root, err := newCARoot(tt.pem, "consul", "cluster")
+			root, err := newCARoot(ca.RootResult{PEM: tt.pem}, "consul", "cluster")
 			if tt.wantErr {
 				require.Error(err)
 				return

@@ -247,7 +247,7 @@ func (m *mockCAProvider) ActiveIntermediate() (string, error) {
 	}
 	return m.intermediatePem, nil
 }
-func (m *mockCAProvider) GenerateIntermediate() (string, error)                     { return "", nil }
+func (m *mockCAProvider) NewLeafSigningCertificate() (string, error)                { return "", nil }
 func (m *mockCAProvider) Sign(*x509.CertificateRequest) (string, error)             { return "", nil }
 func (m *mockCAProvider) SignIntermediate(*x509.CertificateRequest) (string, error) { return "", nil }
 func (m *mockCAProvider) CrossSignCA(*x509.Certificate) (string, error)             { return "", nil }
@@ -575,7 +575,7 @@ func TestCAManager_UpdateConfiguration_Vault_Primary(t *testing.T) {
 		s1.leaderRoutineManager.Wait()
 	}()
 
-	testrpc.WaitForLeader(t, s1.RPC, "dc1")
+	testrpc.WaitForActiveCARoot(t, s1.RPC, "dc1", nil)
 
 	_, origRoot, err := s1.fsm.State().CARootActive(nil)
 	require.NoError(t, err)
@@ -667,8 +667,6 @@ func TestCAManager_Initialize_Vault_WithExternalTrustedCA(t *testing.T) {
 
 	leafCert := getLeafCert(t, codec, roots.TrustDomain, "dc1")
 	verifyLeafCert(t, roots.Active(), leafCert)
-
-	t.FailNow()
 }
 
 func generateExternalRootCA(t *testing.T, client *vaultapi.Client) string {

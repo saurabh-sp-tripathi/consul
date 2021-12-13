@@ -568,7 +568,7 @@ func (a *AWSProvider) ActiveIntermediate() (string, error) {
 }
 
 // GenerateIntermediate implements Provider
-func (a *AWSProvider) GenerateIntermediate() (string, error) {
+func (a *AWSProvider) NewLeafSigningCertificate() (string, error) {
 	// Like the consul provider, for now the Primary DC just gets a root and no
 	// intermediate to sign with. so just return this. Secondaries use
 	// intermediates but this method is only called during primary DC (root)

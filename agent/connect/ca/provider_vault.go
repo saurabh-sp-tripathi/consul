@@ -228,7 +228,7 @@ func (v *VaultProvider) GenerateRoot() (RootResult, error) {
 	}
 
 	// Set up the root PKI backend if necessary.
-	rootPEM, err := v.getCA(v.config.RootPKIPath)
+	rootPEM, err := v.getCA(v.config.RootPKIPath + "/ca_chain")
 	switch err {
 	case ErrBackendNotMounted:
 		err := v.client.Sys().Mount(v.config.RootPKIPath, &vaultapi.MountInput{
@@ -264,7 +264,7 @@ func (v *VaultProvider) GenerateRoot() (RootResult, error) {
 
 		// retrieve the newly generated cert so that we can return it
 		// TODO: is this already available from the Local().Write() above?
-		rootPEM, err = v.getCA(v.config.RootPKIPath)
+		rootPEM, err = v.getCA(v.config.RootPKIPath + "/ca_chain")
 		if err != nil {
 			return RootResult{}, err
 		}
@@ -300,7 +300,12 @@ func (v *VaultProvider) GenerateRoot() (RootResult, error) {
 		}
 	}
 
-	return RootResult{PEM: rootPEM}, nil
+	// TODO: only generate if we don't have an active one already.
+	leafSigningPEM, err := v.NewLeafSigningCertificate()
+	if err != nil {
+		return RootResult{}, fmt.Errorf("failed to generate leaf signing cert: %w", err)
+	}
+	return RootResult{PEM: rootPEM, LeafSigningCertPEM: leafSigningPEM}, nil
 }
 
 // GenerateIntermediateCSR creates a private key and generates a CSR
@@ -421,22 +426,7 @@ func (v *VaultProvider) SetIntermediate(intermediatePEM, rootPEM string) error {
 
 // ActiveIntermediate returns the current intermediate certificate.
 func (v *VaultProvider) ActiveIntermediate() (string, error) {
-	if err := v.setupIntermediatePKIPath(); err != nil {
-		return "", err
-	}
-
-	cert, err := v.getCA(v.config.IntermediatePKIPath)
-
-	// This error is expected when calling initializeSecondaryCA for the
-	// first time. It means that the backend is mounted and ready, but
-	// there is no intermediate.
-	// This error is swallowed because there is nothing the caller can do
-	// about it. The caller needs to handle the empty cert though and
-	// create an intermediate CA.
-	if err == ErrBackendNotInitialized {
-		return "", nil
-	}
-	return cert, err
+	return v.getCA(v.config.IntermediatePKIPath + "/ca/pem")
 }
 
 // getCA returns the raw CA cert for the given endpoint if there is one.
@@ -444,7 +434,7 @@ func (v *VaultProvider) ActiveIntermediate() (string, error) {
 // because the endpoint only returns the raw PEM contents of the CA cert
 // and not the typical format of the secrets endpoints.
 func (v *VaultProvider) getCA(path string) (string, error) {
-	req := v.client.NewRequest("GET", "/v1/"+path+"/ca_chain")
+	req := v.client.NewRequest("GET", "/v1/"+path)
 	resp, err := v.client.RawRequest(req)
 	if resp != nil {
 		defer resp.Body.Close()
@@ -469,10 +459,10 @@ func (v *VaultProvider) getCA(path string) (string, error) {
 	return root, nil
 }
 
-// GenerateIntermediate mounts the configured intermediate PKI backend if
+// NewLeafSigningCertificate mounts the configured intermediate PKI backend if
 // necessary, then generates and signs a new CA CSR using the root PKI backend
 // and updates the intermediate backend to use that new certificate.
-func (v *VaultProvider) GenerateIntermediate() (string, error) {
+func (v *VaultProvider) NewLeafSigningCertificate() (string, error) {
 	csr, err := v.generateIntermediateCSR()
 	if err != nil {
 		return "", err
@@ -499,8 +489,11 @@ func (v *VaultProvider) GenerateIntermediate() (string, error) {
 	if err != nil {
 		return "", err
 	}
-
-	return v.ActiveIntermediate()
+	cert, ok := intermediate.Data["certificate"].(string)
+	if !ok {
+		return "", fmt.Errorf("certificate was not a string")
+	}
+	return cert, nil
 }
 
 // Sign calls the configured role in the intermediate PKI backend to issue
@@ -573,7 +566,7 @@ func (v *VaultProvider) SignIntermediate(csr *x509.CertificateRequest) (string, 
 // CrossSignCA takes a CA certificate and cross-signs it to form a trust chain
 // back to our active root.
 func (v *VaultProvider) CrossSignCA(cert *x509.Certificate) (string, error) {
-	rootPEM, err := v.getCA(v.config.RootPKIPath)
+	rootPEM, err := v.getCA(v.config.RootPKIPath + "/ca/pem")
 	if err != nil {
 		return "", err
 	}

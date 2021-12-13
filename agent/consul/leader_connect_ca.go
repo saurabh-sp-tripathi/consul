@@ -255,8 +255,8 @@ func (c *CAManager) initializeCAConfig() (*structs.CAConfiguration, error) {
 }
 
 // newCARoot returns a filled-in structs.CARoot from a raw PEM value.
-func newCARoot(pemValue, provider, clusterID string) (*structs.CARoot, error) {
-	certs, err := splitCerts(pemValue)
+func newCARoot(root ca.RootResult, provider, clusterID string) (*structs.CARoot, error) {
+	certs, err := splitCerts(root.PEM)
 	if err != nil {
 		return nil, err
 	}
@@ -304,6 +304,15 @@ func newCARoot(pemValue, provider, clusterID string) (*structs.CARoot, error) {
 			return nil, fmt.Errorf("failed to re-encode cert %v: %w", i, err)
 		}
 		caRoot.IntermediateCerts = append(caRoot.IntermediateCerts, pem)
+	}
+	if root.LeafSigningCertPEM != "" {
+		caRoot.IntermediateCerts = append(caRoot.IntermediateCerts, root.LeafSigningCertPEM)
+
+		cert, err := connect.ParseCert(root.LeafSigningCertPEM)
+		if err != nil {
+			return nil, err
+		}
+		caRoot.SigningKey = connect.EncodeSigningKeyID(cert.SubjectKeyId)
 	}
 	return caRoot, nil
 }
@@ -531,19 +540,9 @@ func (c *CAManager) primaryInitialize(provider ca.Provider, conf *structs.CAConf
 		return fmt.Errorf("error generating CA root certificate: %v", err)
 	}
 
-	rootCA, err := newCARoot(root.PEM, conf.Provider, conf.ClusterID)
+	rootCA, err := newCARoot(root, conf.Provider, conf.ClusterID)
 	if err != nil {
 		return err
-	}
-
-	// TODO: delete this
-	interPEM, err := provider.GenerateIntermediate()
-	if err != nil {
-		return fmt.Errorf("error generating intermediate cert: %v", err)
-	}
-	intermediateCert, err := connect.ParseCert(interPEM)
-	if err != nil {
-		return fmt.Errorf("error getting intermediate cert: %v", err)
 	}
 
 	// If the provider has state to persist and it's changed or new then update
@@ -570,7 +569,8 @@ func (c *CAManager) primaryInitialize(provider ca.Provider, conf *structs.CAConf
 	// rootCA's subjectKeyID here instead of the intermediate. For
 	// provider=consul this didn't matter since there are no intermediates in
 	// the primaryDC, but for vault it does matter.
-	expectedSigningKeyID := connect.EncodeSigningKeyID(intermediateCert.SubjectKeyId)
+	// TODO: this is wrong, it never checks against activeRoot.
+	expectedSigningKeyID := rootCA.SigningKey
 	if rootCA.SigningKeyID != expectedSigningKeyID {
 		c.logger.Info("Correcting stored CARoot values",
 			"previous-signing-key", rootCA.SigningKeyID, "updated-signing-key", expectedSigningKeyID)
@@ -578,10 +578,11 @@ func (c *CAManager) primaryInitialize(provider ca.Provider, conf *structs.CAConf
 		rootUpdateRequired = true
 	}
 
-	// Add the local leaf signing cert to the rootCA struct. This handles both
-	// upgrades of existing state, and new rootCA.
-	if c.getLeafSigningCertFromRoot(rootCA) != interPEM {
-		rootCA.IntermediateCerts = append(rootCA.IntermediateCerts, interPEM)
+	// Add the local leaf signing cert to the rootCA struct. This handles updates
+	// of previously persisted CARoot.
+	// TODO: this is wrong, it never checks against activeRoot.
+	if c.getLeafSigningCertFromRoot(rootCA) != root.LeafSigningCertPEM {
+		rootCA.IntermediateCerts = append(rootCA.IntermediateCerts, root.LeafSigningCertPEM)
 		rootUpdateRequired = true
 	}
 
@@ -908,8 +909,7 @@ func (c *CAManager) primaryUpdateRootCA(newProvider ca.Provider, args *structs.C
 		return fmt.Errorf("error generating CA root certificate: %v", err)
 	}
 
-	newRootPEM := providerRoot.PEM
-	newActiveRoot, err := newCARoot(newRootPEM, args.Config.Provider, args.Config.ClusterID)
+	newActiveRoot, err := newCARoot(providerRoot, args.Config.Provider, args.Config.ClusterID)
 	if err != nil {
 		return err
 	}
@@ -945,7 +945,7 @@ func (c *CAManager) primaryUpdateRootCA(newProvider ca.Provider, args *structs.C
 	}
 
 	// get the old CA provider to be used for Cross Signing and to clean it up at the end
-	// of the functi8on.
+	// of the function.
 	oldProvider, _ := c.getCAProvider()
 	if oldProvider == nil {
 		return fmt.Errorf("internal error: CA provider is nil")
@@ -962,11 +962,6 @@ func (c *CAManager) primaryUpdateRootCA(newProvider ca.Provider, args *structs.C
 		// get a cross-signed certificate.
 		// 3. Take the active root for the new provider and append the intermediate from step 2
 		// to its list of intermediates.
-		// TODO: this cert is already parsed once in newCARoot, could we remove the second parse?
-		newRoot, err := connect.ParseCert(newRootPEM)
-		if err != nil {
-			return err
-		}
 
 		// At this point, we know the config change has triggered a root rotation,
 		// either by swapping the provider type or changing the provider's config
@@ -990,6 +985,12 @@ func (c *CAManager) primaryUpdateRootCA(newProvider ca.Provider, args *structs.C
 		// If ForceWithoutCrossSigning wasn't set, attempt to have the old CA generate a
 		// cross-signed intermediate.
 		if canXSign && !args.Config.ForceWithoutCrossSigning {
+			// TODO: this cert is already parsed once in newCARoot, could we remove the second parse?
+			// TODO: primaryCA or TrustedCA ?
+			newRoot, err := connect.ParseCert(newActiveRoot.RootCert)
+			if err != nil {
+				return err
+			}
 			// Have the old provider cross-sign the new root
 			xcCert, err := oldProvider.CrossSignCA(newRoot)
 			if err != nil {
@@ -999,17 +1000,6 @@ func (c *CAManager) primaryUpdateRootCA(newProvider ca.Provider, args *structs.C
 			// Add the cross signed cert to the new CA's intermediates (to be attached
 			// to leaf certs).
 			newActiveRoot.IntermediateCerts = []string{xcCert}
-		}
-	}
-
-	// TODO: delete this
-	intermediate, err := newProvider.GenerateIntermediate()
-	if err != nil {
-		return err
-	}
-	if intermediate != newRootPEM {
-		if err := setLeafSigningCert(newActiveRoot, intermediate); err != nil {
-			return err
 		}
 	}
 
@@ -1060,7 +1050,7 @@ func (c *CAManager) primaryUpdateRootCA(newProvider ca.Provider, args *structs.C
 // It should only be called while the state lock is held by setting the state to non-ready.
 func (c *CAManager) primaryRenewIntermediate(provider ca.Provider, newActiveRoot *structs.CARoot) error {
 	// Generate and sign an intermediate cert using the root CA.
-	intermediatePEM, err := provider.GenerateIntermediate()
+	intermediatePEM, err := provider.NewLeafSigningCertificate()
 	if err != nil {
 		return fmt.Errorf("error generating new intermediate cert: %v", err)
 	}
@@ -1169,11 +1159,7 @@ func (c *CAManager) RenewIntermediate(ctx context.Context, isPrimary bool) error
 		return nil
 	}
 
-	activeIntermediate, err := provider.ActiveIntermediate()
-	if err != nil {
-		return err
-	}
-
+	activeIntermediate := c.getLeafSigningCertFromRoot(root)
 	if activeIntermediate == "" {
 		return fmt.Errorf("datacenter doesn't have an active intermediate.")
 	}

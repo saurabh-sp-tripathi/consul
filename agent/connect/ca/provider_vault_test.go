@@ -799,7 +799,7 @@ func createVaultProvider(t *testing.T, isPrimary bool, addr, token string, rawCo
 	if isPrimary {
 		_, err := provider.GenerateRoot()
 		require.NoError(t, err)
-		_, err = provider.GenerateIntermediate()
+		_, err = provider.NewLeafSigningCertificate()
 		require.NoError(t, err)
 	}
 

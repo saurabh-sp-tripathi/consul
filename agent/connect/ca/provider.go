@@ -84,13 +84,6 @@ type Provider interface {
 	// in the Provider struct so it won't change after being returned.
 	State() (map[string]string, error)
 
-	// ActiveIntermediate returns the current signing cert used by this provider
-	// for generating SPIFFE leaf certs. Note that this must not change except
-	// when Consul requests the change via GenerateIntermediate. Changing the
-	// signing cert will break Consul's assumptions about which validation paths
-	// are active.
-	ActiveIntermediate() (string, error)
-
 	// Sign signs a leaf certificate used by Connect proxies from a CSR. The PEM
 	// returned should include only the leaf certificate as all Intermediates
 	// needed to validate it will be added by Consul based on the active
@@ -136,7 +129,8 @@ type PrimaryProvider interface {
 	// the chain from the signing certificate back to the active root, they should
 	// all by bundled here.
 	// TODO: replace with GenerateLeafSigningCert
-	GenerateIntermediate() (string, error)
+	// TODO: change to always return only the single cert, not the full chain.
+	NewLeafSigningCertificate() (string, error)
 
 	// SignIntermediate will validate the CSR to ensure the trust domain in the
 	// URI SAN matches the local one and that basic constraints for a CA
@@ -172,6 +166,14 @@ type PrimaryProvider interface {
 }
 
 type SecondaryProvider interface {
+	// ActiveIntermediate returns the current signing cert used by this provider
+	// for generating SPIFFE leaf certs. Note that this must not change except
+	// when Consul requests the change via NewLeafSigningCertificate. Changing the
+	// signing cert will break Consul's assumptions about which validation paths
+	// are active.
+	// TODO: rename to ActiveLeafSigningCertificate
+	ActiveIntermediate() (string, error)
+
 	// GenerateIntermediateCSR should return a CSR for an intermediate CA
 	// certificate. The intermediate CA will be signed by the primary CA and
 	// should be used by the provider to sign leaf certificates in the local
@@ -201,6 +203,10 @@ type RootResult struct {
 	// If there is only a single certificate in the bundle then it will be used
 	// as both the primary CA and the trusted CA.
 	PEM string
+	// LeafSigningCertPEM is the intermediate certificate used to sign leaf
+	// certificates in this datacenter. It must always be a child of the
+	// primary CA returned in PEM.
+	LeafSigningCertPEM string
 }
 
 // NeedsStop is an optional interface that allows a CA to define a function
