@@ -227,8 +227,12 @@ func (v *VaultProvider) GenerateRoot() (RootResult, error) {
 		return RootResult{}, fmt.Errorf("provider is not the root certificate authority")
 	}
 
+	fmt.Println("what")
+	fmt.Println(v.getCA(v.config.RootPKIPath + "/ca_chain"))
+	fmt.Println(v.getCA(v.config.RootPKIPath + "/ca/pem"))
+
 	// Set up the root PKI backend if necessary.
-	rootPEM, err := v.getCA(v.config.RootPKIPath + "/ca_chain")
+	rootPEM, err := v.getCA(v.config.RootPKIPath + "/ca/pem")
 	switch err {
 	case ErrBackendNotMounted:
 		err := v.client.Sys().Mount(v.config.RootPKIPath, &vaultapi.MountInput{
