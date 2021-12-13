@@ -1492,6 +1492,10 @@ func (c *CAManager) SignCertificate(csr *x509.CertificateRequest, spiffeID conne
 
 	// Append any intermediates needed by this root.
 	for _, p := range caRoot.IntermediateCerts {
+		c, _ := connect.ParseCert(p)
+		if c != nil {
+			fmt.Println("adding in sign", c.Subject, p)
+		}
 		pem = pem + ca.EnsureTrailingNewline(p)
 	}
 

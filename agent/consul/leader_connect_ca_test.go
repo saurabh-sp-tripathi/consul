@@ -122,6 +122,7 @@ func verifyLeafCert(t *testing.T, root *structs.CARoot, leafCertPEM string) {
 	for _, intermediate := range root.IntermediateCerts {
 		c, err := connect.ParseCert(intermediate)
 		require.NoError(t, err)
+		fmt.Println("adding int cert (2)", c.Subject)
 		intermediates.AddCert(c)
 	}
 
@@ -666,6 +667,8 @@ func TestCAManager_Initialize_Vault_WithExternalTrustedCA(t *testing.T) {
 
 	leafCert := getLeafCert(t, codec, roots.TrustDomain, "dc1")
 	verifyLeafCert(t, roots.Active(), leafCert)
+
+	t.FailNow()
 }
 
 func generateExternalRootCA(t *testing.T, client *vaultapi.Client) string {

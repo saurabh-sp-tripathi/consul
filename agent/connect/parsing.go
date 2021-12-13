@@ -50,6 +50,7 @@ func ParseLeafCerts(pemValue string) (*x509.Certificate, *x509.CertPool, error) 
 		if !cert.IsCA {
 			return nil, nil, fmt.Errorf("found an unexpected leaf cert after the first PEM-block")
 		}
+		fmt.Println("adding intermediate cert", cert.Subject)
 		intermediates.AddCert(cert)
 	}
 
