@@ -227,10 +227,6 @@ func (v *VaultProvider) GenerateRoot() (RootResult, error) {
 		return RootResult{}, fmt.Errorf("provider is not the root certificate authority")
 	}
 
-	fmt.Println("what")
-	fmt.Println(v.getCA(v.config.RootPKIPath + "/ca_chain"))
-	fmt.Println(v.getCA(v.config.RootPKIPath + "/ca/pem"))
-
 	// Set up the root PKI backend if necessary.
 	rootPEM, err := v.getCA(v.config.RootPKIPath + "/ca/pem")
 	switch err {
@@ -266,13 +262,6 @@ func (v *VaultProvider) GenerateRoot() (RootResult, error) {
 			return RootResult{}, err
 		}
 
-		// retrieve the newly generated cert so that we can return it
-		// TODO: is this already available from the Local().Write() above?
-		rootPEM, err = v.getCA(v.config.RootPKIPath + "/ca_chain")
-		if err != nil {
-			return RootResult{}, err
-		}
-
 	default:
 		if err != nil {
 			return RootResult{}, err
@@ -304,12 +293,24 @@ func (v *VaultProvider) GenerateRoot() (RootResult, error) {
 		}
 	}
 
+	// FIXME: handle this in the ErrBackendNotInitialized case if this is removed.
+	rootChain, err := v.getCA(v.config.RootPKIPath + "/ca_chain")
+	// check ErrBackendNotInitialized because that meants "empty response"
+	if err != nil && err != ErrBackendNotInitialized {
+		return RootResult{}, err
+	}
+
+	// Handles when there is only a single PEM, no chain.
+	if rootChain == "" {
+		rootChain = rootPEM
+	}
+
 	// TODO: only generate if we don't have an active one already.
 	leafSigningPEM, err := v.NewLeafSigningCertificate()
 	if err != nil {
 		return RootResult{}, fmt.Errorf("failed to generate leaf signing cert: %w", err)
 	}
-	return RootResult{PEM: rootPEM, LeafSigningCertPEM: leafSigningPEM}, nil
+	return RootResult{PEM: rootChain, LeafSigningCertPEM: leafSigningPEM}, nil
 }
 
 // GenerateIntermediateCSR creates a private key and generates a CSR

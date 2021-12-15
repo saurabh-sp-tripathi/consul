@@ -488,7 +488,7 @@ func (c *CAManager) secondaryInitialize(provider ca.Provider, conf *structs.CACo
 	}
 	var roots structs.IndexedCARoots
 	if err := c.delegate.forwardDC("ConnectCA.Roots", c.serverConf.PrimaryDatacenter, &args, &roots); err != nil {
-		return err
+		return fmt.Errorf("failed to get CA roots from primary DC: %w", err)
 	}
 	c.secondarySetPrimaryRoots(roots)
 
@@ -658,7 +658,7 @@ func (c *CAManager) getLeafSigningCertFromRoot(root *structs.CARoot) string {
 // state to non-ready.
 func (c *CAManager) secondaryInitializeIntermediateCA(provider ca.Provider, config *structs.CAConfiguration) error {
 	activeIntermediate, err := provider.ActiveIntermediate()
-	if err != nil {
+	if err != nil && !errors.Is(err, ca.ErrBackendNotInitialized) {
 		return err
 	}
 
