@@ -475,6 +475,40 @@ func TestListenersFromSnapshot(t *testing.T) {
 				}
 			},
 		},
+
+		{
+			name:   "terminating-gateway-with-custom-listener",
+			create: proxycfg.TestConfigSnapshotTerminatingGateway,
+			setup: func(snap *proxycfg.ConfigSnapshot) {
+				serviceName := structs.NewServiceName("web", nil)
+				snap.TerminatingGateway.ServiceResolvers[serviceName] = &structs.ServiceResolverConfigEntry{
+					Meta: map[string]string{
+						"ARN":                "arn:aws:lambda:us-east-2:977604411308:function:consul-ecs-lambda-test",
+						"PayloadPassthrough": "true",
+					},
+				}
+				snap.TerminatingGateway.EnvoyConfigs["lambda-patch"] = make(map[string]*structs.EnvoyPatchSetConfigEntry)
+				snap.TerminatingGateway.EnvoyConfigs["lambda-patch"]["0.0.1"] = &structs.EnvoyPatchSetConfigEntry{
+					Patches: []structs.Patch{
+						{
+							Type:  structs.Replace,
+							Path:  "/",
+							Value: customLambdaJSONTpl,
+						},
+					},
+				}
+
+				snap.TerminatingGateway.ServiceEnvoyConfigApplications[serviceName] = &structs.ApplyEnvoyPatchSetConfigEntry{
+					EnvoyPatchSet: structs.ApplyEnvoyPatchSetIdentifier{
+						Name:    "lambda-patch",
+						Version: "0.0.1",
+					},
+					Filter: structs.ApplyEnvoyPatchSetFilter{
+						Service: "web",
+					},
+				}
+			},
+		},
 		{
 			name:   "ingress-http-multiple-services",
 			create: proxycfg.TestConfigSnapshotIngress_HTTPMultipleServices,
@@ -1052,6 +1086,50 @@ type customListenerJSONOptions struct {
 	Name       string
 	TLSContext string
 }
+
+const customLambdaJSONTpl = `
+{
+	"@type": "type.googleapis.com/envoy.config.listener.v3.Filter",
+	"name": "envoy.filters.network.http_connection_manager",
+	"typed_config": {
+		"@type": "type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager",
+		"stat_prefix": "consul-ecs-lambda-test",
+		"route_config": {
+			"name": "public_listener",
+			"virtual_hosts": [
+				{
+					"domains": [
+						"*"
+					],
+					"name": "public_listener",
+					"routes": [
+						{
+							"match": {
+								"prefix": "/"
+							},
+							"route": {
+								"cluster": "{{ .ClusterName }}"
+							}
+						}
+					]
+				}
+			]
+		},
+		"http_filters": [
+			{
+				"name": "envoy.filters.http.aws_lambda",
+				"typed_config": {
+					"@type": "type.googleapis.com/envoy.extensions.filters.http.aws_lambda.v3.Config",
+					"arn": "{{ index .Meta "ARN" }}",
+					"payload_passthrough": {{ index .Meta "PayloadPassthrough" | printf "%v" }}
+				}
+			},
+			{
+				"name": "envoy.filters.http.router"
+			}
+		]
+	}
+}`
 
 const customListenerJSONTpl = `{
 	"@type": "type.googleapis.com/envoy.config.listener.v3.Listener",

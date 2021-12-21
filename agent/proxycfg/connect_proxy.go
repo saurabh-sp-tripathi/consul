@@ -28,6 +28,9 @@ func (s *handlerConnectProxy) initialize(ctx context.Context) (ConfigSnapshot, e
 	snap.ConnectProxy.PreparedQueryEndpoints = make(map[string]structs.CheckServiceNodes)
 	snap.ConnectProxy.UpstreamConfig = make(map[string]*structs.Upstream)
 	snap.ConnectProxy.PassthroughUpstreams = make(map[string]ServicePassthroughAddrs)
+	snap.ConnectProxy.WatchedServiceConfigs = make(map[structs.ServiceName]context.CancelFunc)
+	snap.ConnectProxy.ServiceConfigs = make(map[structs.ServiceName]*structs.ServiceConfigResponse)
+	snap.ConnectProxy.ServiceEnvoyConfigApplications = make(map[structs.ServiceName]*structs.ApplyEnvoyPatchSetConfigEntry)
 
 	// Watch for root changes
 	err := s.cache.Notify(ctx, cachetype.ConnectCARootName, &structs.DCSpecificRequest{
@@ -201,6 +204,67 @@ func (s *handlerConnectProxy) handleUpdate(ctx context.Context, u cache.UpdateEv
 			return fmt.Errorf("invalid type for response: %T", u.Result)
 		}
 		snap.Roots = roots
+	case u.CorrelationID == envoyConfigPatchesID:
+		configEntries, ok := u.Result.(structs.IndexedConfigEntries)
+
+		if !ok {
+			return fmt.Errorf("invalid type for response thingy: %T", u.Result)
+		}
+
+		patchSet := make(map[string]map[string]*structs.EnvoyPatchSetConfigEntry)
+		for _, e := range configEntries.Entries {
+			envoyConfigPatch, ok := e.(*structs.EnvoyPatchSetConfigEntry)
+
+			if !ok {
+				return fmt.Errorf("invalid type for response stuff: %T", u.Result)
+			}
+			if patchSet[envoyConfigPatch.Name] == nil {
+				patchSet[envoyConfigPatch.Name] = make(map[string]*structs.EnvoyPatchSetConfigEntry)
+			}
+
+			patchSet[envoyConfigPatch.Name][envoyConfigPatch.Version] = envoyConfigPatch
+		}
+
+		if !ok {
+			return fmt.Errorf("invalid type for response asf: %T", u.Result)
+		}
+
+		snap.ConnectProxy.EnvoyConfigs = patchSet
+	case u.CorrelationID == envoyConfigApplicationID:
+		configEntries, ok := u.Result.(structs.IndexedConfigEntries)
+
+		if !ok {
+			return fmt.Errorf("invalid type for response thingy: %T", u.Result)
+		}
+
+		var patchSetApplications []*structs.ApplyEnvoyPatchSetConfigEntry
+		servicePatchSetApplications := make(map[structs.ServiceName]*structs.ApplyEnvoyPatchSetConfigEntry)
+		for _, e := range configEntries.Entries {
+			a, ok := e.(*structs.ApplyEnvoyPatchSetConfigEntry)
+
+			if !ok {
+				return fmt.Errorf("invalid type for response stuff: %T", u.Result)
+			}
+
+			if a.Filter.Service == "" {
+				patchSetApplications = append(patchSetApplications, a)
+			} else {
+				serviceName := structs.ServiceName{
+					Name: a.Filter.Service,
+					// TODO Enterprise Meta. This might break.
+				}
+				// Only allow take the last one for new because POC. We might want to enforce this
+				// elsewhere at some point.
+				servicePatchSetApplications[serviceName] = a
+			}
+		}
+
+		if !ok {
+			return fmt.Errorf("invalid type for response asf: %T", u.Result)
+		}
+
+		snap.ConnectProxy.EnvoyConfigApplications = patchSetApplications
+		snap.ConnectProxy.ServiceEnvoyConfigApplications = servicePatchSetApplications
 	case u.CorrelationID == intentionsWatchID:
 		resp, ok := u.Result.(*structs.IndexedIntentionMatches)
 		if !ok {
